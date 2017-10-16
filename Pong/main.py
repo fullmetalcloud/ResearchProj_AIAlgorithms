@@ -9,8 +9,8 @@ render = False
 
 def main():
     # hyperparameters
-    num_hidden_layer_neurons = 200
-    num_output_neurons = 1
+    num_layer_neurons_NN = [6400, 200, 1]
+    num_layer_neurons_ConvoNN = [64, 200, 1]
     height = 80
     width = 80
     directory = os.getcwd() + "/tmp/"
@@ -39,8 +39,8 @@ def main():
                                  video_callable=lambda episode_id: 0 == episode_number_NEAT % record_rate_NEAT)
 
     #initialize neural network algorithms
-    nn = NeuralNetwork(height * width, num_hidden_layer_neurons, num_output_neurons, batch_size=1)
-    convo_nn = ConvolutionNN(num_hidden_layer_neurons,num_output_neurons, height, width, batch_size=1)
+    nn = NeuralNetwork(num_layer_neurons_NN)
+    convo_nn = ConvolutionNN(num_layer_neurons_ConvoNN, height, width)
     while True:
         episode_number_NN = nn.episode_num
         print(episode_number_NN)
@@ -57,15 +57,15 @@ def main():
             record_rate_NN = 2000
 
         #evaluate Convolutional Fully Connected Neural Network
-        episode_number_ConvoNN = convo_nn.episode_num
-        start = time.time()
-        convo_nn.eval(envConvoNN, sess_2, render)
-        end = time.time()
-        print("Convolutional Neural Network Time: " + str(end - start))
-        print("Convolutional Neural Network Reward: " + str(convo_nn.reward_sum))
-        if convo_nn.episode_num == 1000:
-            record_rate_convoNN = 1000
-        elif convo_nn.episode_num == 10000:
-            record_rate_convoNN = 2000
+        # episode_number_ConvoNN = convo_nn.episode_num
+        # start = time.time()
+        # convo_nn.eval(envConvoNN, sess_2, render)
+        # end = time.time()
+        # print("Convolutional Neural Network Time: " + str(end - start))
+        # print("Convolutional Neural Network Reward: " + str(convo_nn.reward_sum))
+        # if convo_nn.episode_num == 1000:
+        #     record_rate_convoNN = 1000
+        # elif convo_nn.episode_num == 10000:
+        #     record_rate_convoNN = 2000
 
 main()
