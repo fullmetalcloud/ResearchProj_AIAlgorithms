@@ -1,8 +1,4 @@
 
-import gym
-import numpy as np
-import tensorflow as tf
-
 from neuralnet import *
 
 class ConvolutionNN(NeuralNetwork):

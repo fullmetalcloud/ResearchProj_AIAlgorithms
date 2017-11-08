@@ -1,21 +1,66 @@
 from neuralnet import NeuralNetwork, NNTest
 from convonn import ConvolutionNN
 from neatq import NEATPong, NeatTest
+from multiprocessing import Manager
 import tensorflow as tf
 import gym
 import time
 import os
-import itertools
 import matplotlib.pyplot as pyplot
 
 fig, ax = pyplot.subplots()
 
+"""
+ShowNEATNeuralNetwork
+brief: graph neural network
+input: genome
+output:none 
+"""
+def ShowNEATNeuralNetwork(genome, nodeGeneArray):
+    layers = {}
+    for v in set(nodeGeneArray.values()):
+        layers[v] = []
+    for k, v in nodeGeneArray.items():
+        layers[v].append(k)
+    largestLayerSize = max(len(x) for x in layers.values())
+
+    for i, j in enumerate(genome.geneArray):
+        neuron1 = j.n1
+        neuron2 = j.n2
+        layerN1 = layers[nodeGeneArray[neuron1]]
+        layerN2 = layers[nodeGeneArray[neuron2]]
+        n1 = layerN1.index(neuron1)
+        n2 = layerN2.index(neuron2)
+        type1 = nodeGeneArray[neuron1]
+        type2 = nodeGeneArray[neuron2]
+        posN1 = n1 * largestLayerSize / len(layerN1) + largestLayerSize / len(layerN1) / 2
+        posN2 = n2 * largestLayerSize / len(layerN2) + largestLayerSize / len(layerN2) / 2
+        line_y = (posN1, posN2)
+        line_x = (type1, type2)
+        if genome.activationList[i]:
+            if genome.weights[i] > 0:
+                pyplot.plot(line_x, line_y, linewidth=genome.weights[i], color='blue')
+            else:
+                pyplot.plot(line_x, line_y, linewidth=genome.weights[i], color='red')
+        if type1 == 1:
+            pyplot.plot(type1, posN1, 'o', color='green')
+        else:
+            pyplot.plot(type1, posN1, 'o', color='black')
+        pyplot.plot(type2, posN2, 'o', color='black')
+
+    pyplot.show()
+    return
+
+
 def main():
     # for testing
     render = False
+
+    Run_Pong = False
     convoNN = False
     neuralNet = False
     NeatAlgo = False
+
     NNTests = False
     NEATTests = True
 
@@ -29,21 +74,17 @@ def main():
     height = 80
     width = 80
     directory = os.getcwd() + "/tmp/"
-
-
-
+    reward = []
     #parameters for monitoring and recording games
     episode_number_NN = 0
     time_nn, reward_nn  = [0], [0]
     episode_number_ConvoNN = 0
     time_convonn, reward_convonn = [0], [0]
     episode_number_NEAT = 0
+    time_neat, reward_neat = [0], [0]
     record_rate_NN = 100
     record_rate_convoNN = 100
     record_rate_NEAT = 100
-
-
-
 
     #initialize gym environment
     if neuralNet:
@@ -61,10 +102,10 @@ def main():
         convo_nn = ConvolutionNN(num_layer_neurons_ConvoNN, height, width, sess_convonn)
     if NeatAlgo:
         envNEAT = gym.make('Pong-v0')
-        envNEAT = gym.wrappers.Monitor(envNEAT, directory+"NEAT", force=True,
-                                 video_callable=lambda episode_id: 0 == episode_number_NEAT % record_rate_NEAT)
-        neat = NEATPong(numInputs, numOutputs)
-
+        manager = Manager()
+        # envNEAT = gym.wrappers.Monitor(envNEAT, directory+"NEAT", force=True,
+        #                          video_callable=lambda episode_id: 0 == episode_number_NEAT % record_rate_NEAT)
+        neat = NEATPong(numInputs, numOutputs, manager, envNEAT, render, render_mod)
     # Unit testing of classes
     if NNTests:
         accuracy = 0
@@ -87,81 +128,56 @@ def main():
         arrGenome = "["
         nCount = 0
         numEpisodes = 0
+        avgTime = 0
         numTests = 10
         topGenomes = []
         print("NEATTests Beginning: ")
         for i in range(0,numTests):
             print("... testing " + str(i) + "...")
             neatTest = NeatTest()
+            start = time.time()
             neatTest.XOREvaluation()
-
+            end = time.time()
             population =neatTest.population
 
             print("results: " + str(i))
-            print(len(neatTest.speciesGroups))
             reward = []
             for genome in population:
                 reward.append(genome.answer)
             sortedPop = [x for _,x in sorted(zip(reward,population), key=lambda pair: pair[0], reverse=True)]
             genome = sortedPop[0]
             topGenomes.append(genome)
-            for gene in genome.geneArray:
-                arrGenome += str(gene.n1)
-                arrGenome += ", "
-                arrGenome += str(gene.n2)
-                arrGenome += "; "
-            print(arrGenome + "]")
-            arrGenome = "["
-            print(genome.weights)
-            print(genome.activationList)
-            print(genome.neuronArray)
-            print(genome.answer)
-            print(genome.tests)
+            # print(len(neatTest.speciesGroups))
+            # for gene in genome.geneArray:
+            #     arrGenome += str(gene.n1)
+            #     arrGenome += ", "
+            #     arrGenome += str(gene.n2)
+            #     arrGenome += "; "
+            # print(arrGenome + "]")
+            # arrGenome = "["
+            # print(genome.weights)
+            # print(genome.activationList)
+            # print(genome.neuronArray)
+            # print(genome.answer)
+            # print(genome.tests)
             print()
-            layers = {}
             neurons = []
-            nodeGeneArray = neatTest.nodeGeneArray
-            for v in set(nodeGeneArray.values()):
-                layers[v] = []
-            for k, v in nodeGeneArray.items():
-                layers[v].append(k)
-            largestLayerSize = max(len(x) for x in layers.values())
+            ShowNEATNeuralNetwork(genome, neatTest.nodeGeneArray)
             for i, j in enumerate(genome.geneArray):
-                neuron1 = j.n1
-                neuron2 = j.n2
-                neurons.append(neuron1)
-                neurons.append(neuron2)
-                layerN1 = layers[nodeGeneArray[neuron1]]
-                layerN2 = layers[nodeGeneArray[neuron2]]
-                n1 = layerN1.index(neuron1)
-                n2 = layerN2.index(neuron2)
-                type1 = neatTest.nodeGeneArray[neuron1]
-                type2 = neatTest.nodeGeneArray[neuron2]
-                posN1 = n1 * largestLayerSize/len(layerN1) + largestLayerSize/len(layerN1)/2
-                posN2 = n2 * largestLayerSize/len(layerN2) + largestLayerSize/len(layerN2)/2
-                line_y = (posN1, posN2)
-                line_x = (type1, type2)
-                if genome.activationList[i]:
-                    if genome.weights[i] > 0:
-                        pyplot.plot(line_x, line_y, linewidth=genome.weights[i], color='blue')
-                    else:
-                        pyplot.plot(line_x, line_y, linewidth=genome.weights[i], color='red')
-                if type1 == 1:
-                    pyplot.plot(type1, posN1, 'o', color='green')
-                else:
-                    pyplot.plot(type1, posN1, 'o', color='black')
-                pyplot.plot(type2, posN2, 'o', color='black')
-
-            pyplot.show()
+                neurons.append(j.n1)
+                neurons.append(j.n2)
             print(genome.answer)
             print(len(set(neurons)), neatTest.numEpisodes)
+            print(str(end-start))
             nCount += len(set(neurons))
             numEpisodes += neatTest.numEpisodes
+            avgTime += (end - start)
             print()
         print("Average Number of Nodes: " + str(nCount/numTests))
         print("Average Episodes: " + str(numEpisodes/numTests))
+        print("Average Time: " + str(avgTime/numTests))
 
-    else:
+    if Run_Pong:
         while True:
             # Pong Game
             if neuralNet:
@@ -207,8 +223,22 @@ def main():
                     record_rate_convoNN = 2000
 
             if NeatAlgo:
-                y = 1
-                y+=1
-                y-=1
+                episode_number_NEAT = neat.numEpisodes
+                print(episode_number_NEAT)
+                start = time.time()
+                neat.PongEvaluation()
+                end = time.time()
+                for genome in neat.population:
+                    reward.append(genome.answer)
+                sortedPop = [x for _, x in sorted(zip(reward, neat.population), key=lambda pair: pair[0], reverse=True)]
+
+                print("Neat Algorithm Time: " + str(end - start))
+                print("Neat Algorithm Reward: " + str(sortedPop[0].answer))
+                time_neat.append(end-start)
+                reward_neat.append(sortedPop[0].answer)
+                if episode_number_NEAT % record_rate_NEAT == 0:
+                    print("Average Neat Algorithm time: " + str(sum(time_neat) / len(time_neat)))
+                    print("Average Neat Algorithm reward: " + str(sum(reward_neat) / len(reward_neat)))
+
 
 main()

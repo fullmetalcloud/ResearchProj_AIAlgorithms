@@ -6,30 +6,36 @@ import operator
 import random
 import copy
 from pong_image import *
+import time
+import gym
+from multiprocessing import Process, Array, Manager, Pool
+import tensorflow as tf
 
-POP_SIZE = 200
-STALEMATE_LIMIT = 10
-SPECIES_THRESHOLD = 3.3
-ADJUST_DELTA = 0.3
-GENE_SIZE_LIMIT = 10
-PERCENT_CHAMPS = 0.2
+POP_SIZE = 20                             # Population size
+STALEMATE_LIMIT = 20                        # Limit of Species Stalemate
+SPECIES_THRESHOLD = 100                      # Initial Species delta if need more or less species
+ADJUST_DELTA = 0.03                          # change in Species Delta (increase for more and vice versa)
+GENE_SIZE_LIMIT = 6600                      # Gene size limit before gene size is taken into account
+PERCENT_CHAMPS = 0.20                       # percent of genomes that are saved
+SPECIES_SIZE = 10                            # Number of desired species before delta declination
+NO_CHANGE_LIMIT = 20                       # Limit of generations a population does not change in fitness
 
-ACTIVATION_PROB = 0.25
-NODE_PROB = 0.03
-CONN_PROB = 0.05
-WEIGHT_PROB = 0.8
-NEW_WEIGHT_PROB = 0.2
-CROSS_MUTATION_PROB = 0.01
+ACTIVATION_PROB = 0.25                      # chance activation is second parent genome
+NODE_PROB = 0.3                             # chance node mutation occurs to new genome
+CONN_PROB = 0.7                             # chance connection mutation occurs to new genome
+WEIGHT_PROB = 0.8                           # chance Weight mutation occurs to new genome
+NEW_WEIGHT_PROB = 0.2                       # chance weight is changed completely
+CROSS_MUTATION_PROB = 0.01                  # chance genome crosses over with another genome from another species
 
-SPECIES_SIZE = 10
+SIG_MOD = 1                                 # adjustment to sigmoid function
+INIT_WEIGHT_VALUE = 5                       # largest starting weight of connection
+WEIGHT_STDEV = 0.1                          # deviation and perturbation of weight
+C1, C2, C3 = 0.5, 0.5, 0.3                      # constants of genome compatibility
+INIT_FUNC = 'Relu'                          # initial function of layer evaluation (default is Sigmoid)
+                                            # check list in layerEvaluation for names of functions
+                                            # last layer is always evaluated with Sigmoid function
 
-SIG_MOD = 4.9
-INIT_WEIGHT_VALUE = 1
-WEIGHT_STDEV = 0.05
-C1, C2, C3 = 1, 1, 1
-
-NUM_EPISODES = 1000
-EXPECTED_ACCURACY = 0.9
+EXPECTED_ACCURACY = 0.9                     # (NEATTest only) expected accuracy of XOR test
 
 # Neuron Gene shows unique id and what type of gene. 1 = input, 2 = output, 3 or more = hidden
 # Node Gene array is an implicit dictionary of node neurons
@@ -63,71 +69,167 @@ class Genome():
         self.activationList = activationList            # activation of connection gene
         self.genesMutated = genesMutated                # tracks the mutations that occurred in genome
         self.neuronArray = {}                           # for evaluation of NN
-        self.fitness = 0                                # fitness value after evaluation
+        self.fitness = 0.0                              # fitness value after evaluation
         self.answer = 0                                 # answer to problem
-        self.tests = []
+        self.test = 0                                   # for testing
+        self.tests = []                                 # for testing
+
     """
-    GenomeEval
+    GenomeEval (BAD VERSION)
     brief: evaluates Genome NN
     input: none
-    output: none 
+    output: none
+    """
+    # def GenomeEval(self, inputArray, nodeGeneArray):
+    #     layerArray = {}
+    #     start = time.time()
+    #     # setup neuron array to evaluate each node
+    #     for connLoc, connGene in enumerate(self.geneArray):
+    #         self.neuronArray[connGene.n1] = 0
+    #         self.neuronArray[connGene.n2] = 0
+    #         if not connGene.n2 in layerArray:
+    #             layerArray[connGene.n2] = []
+    #         layerArray[connGene.n2].append(connLoc)
+    #     end = time.time()
+    #     self.test += end - start
+    #     print("SETUP TIME:" + str(end-start))
+    #     # add input values to input neurons in neuron array
+    #     for j, input in enumerate(inputArray):
+    #         self.neuronArray[j] = input
+    #     start = time.time()
+    #     # evaluate each layer in order from smallest (inputs) to largest (outputs)
+    #     test = sorted(nodeGeneArray.items(), key=lambda t: t[::-1])
+    #     for nodeNum, layerNum in test:
+    #         if nodeNum in layerArray:
+    #             if layerNum > 1:
+    #                 self.layerEvaluation(nodeNum, layerArray[nodeNum])
+    #     end = time.time()
+    #
+    #     print("EVAL TIME: " + str(end - start))
+    #     return
+    #
+    # """
+    # layerEvaluation
+    # brief: evaluates given layer of NN
+    # input: nodeGeneArray
+    # output:none
+    # """
+    # def layerEvaluation(self,nodeNum, connGenes):
+    #     for j in connGenes:
+    #         neuron1 = self.geneArray[j].n1
+    #         if self.activationList[j]:
+    #             self.neuronArray[nodeNum] += self.neuronArray[neuron1] * self.weights[j]
+    #     value = self.neuronArray[nodeNum]
+    #     try:
+    #         self.neuronArray[nodeNum] = self.ActivationFunction(value)
+    #     except:
+    #         exit(1)
+    #     return
+
+    """
+    GenomeEval (Working Version)
+    brief: evaluates Genome NN
+    input: none
+    output: none
     """
     def GenomeEval(self, inputArray, nodeGeneArray):
         # setup neuron array to evaluate each node
-        for connGene in self.geneArray:
-            self.neuronArray[connGene.n1] = 0
-            self.neuronArray[connGene.n2] = 0
+        for node in nodeGeneArray.keys():
+            self.neuronArray[node] = 0
         # add input values to input neurons in neuron array
         for j, input in enumerate(inputArray):
             self.neuronArray[j] = input
         # evaluate each layer in order from smallest (inputs) to largest (outputs)
-        for i in sorted(set(nodeGeneArray.values())):
-            if i > 1:
-                self.layerEvaluation(i,nodeGeneArray)
+        layerEval = self.layerEvaluation
+        layers = sorted(set(nodeGeneArray.values()))
+        for i in layers:
+            if i == max(layers):
+                layerEval(i, nodeGeneArray, 'Sigmoid')
+            elif i > 1:
+                layerEval(i, nodeGeneArray)
         return
 
     """
     layerEvaluation
     brief: evaluates given layer of NN
     input: nodeGeneArray
-    output:none 
+    output:none
     """
-    def layerEvaluation(self,type, nodeGeneArray):
+    def layerEvaluation(self, type, nodeGeneArray, func=INIT_FUNC):
+        output = []
         # check each connection gene array
-        for j in range(0,len(self.geneArray)):
+        for j, gene in enumerate(self.geneArray):
             # get node genes in the connection gene
-            neuron1 = self.geneArray[j].n1
-            neuron2 = self.geneArray[j].n2
-            try:
+            neuron1 = gene.n1
+            neuron2 = gene.n2
+            # try:
                 # if gene is activated and receiving node is layer to evaluate, add sending node * weight
-                if self.activationList[j] and nodeGeneArray[neuron2] == type:
-                    self.neuronArray[neuron2] += self.neuronArray[neuron1]*self.weights[j]
-            except:
-                print("layer_eval_collect",j, neuron2, len(self.activationList), len(nodeGeneArray))
-                print([list(a.innovationNum for a in self.geneArray)])
-                print(sys.exc_info()[0])
-                exit(1)
+            if self.activationList[j] and nodeGeneArray[neuron2] == type:
+                self.neuronArray[neuron2] += self.neuronArray[neuron1] * self.weights[j]
+                output.append(neuron2)
+            # except:
+            #     print("layer_eval_collect",j, neuron2, len(self.activationList), len(nodeGeneArray))
+            #     print([list(a.innovationNum for a in self.geneArray)])
+            #     print(sys.exc_info()[0])
+            #     exit(1)
+
+        # Determine activation function
+        if func == 'Relu':
+            activationFunc = self.ReLUFunction
+        elif func == 'ArcTan':
+            activationFunc = self.ArcTanFunction
+        else:
+            activationFunc = self.SigmoidFunction
+
         # if not the input layer, evaluate nodes in layer with activation function (sigmoid func)
-        output = set(gene.n2 for gene in self.geneArray if nodeGeneArray[gene.n2] == type)
-        for neuron in output:
-            try:
-                value = self.neuronArray[neuron]
-                self.neuronArray[neuron] = self.ActivationFunction(value)
-            except:
-                print("layer_eval_activation_function", j, neuron, len(self.activationList), len(nodeGeneArray))
-                print([list(a.innovationNum for a in self.geneArray)])
-                print(sys.exc_info()[0])
-                exit(1)
+        for neuron in set(output):
+            # try:
+            value = self.neuronArray[neuron]
+            self.neuronArray[neuron] = activationFunc(value)
+            # except:
+            #     print("layer_eval_activation_function", j, neuron, len(self.activationList), len(nodeGeneArray))
+            #     print([list(a.innovationNum for a in self.geneArray)])
+            #     print(sys.exc_info()[0])
+            #     exit(1)
         return
 
     """
-    ActivationFunction
+    GenomeEval (Tensorflow Version)
+    brief: evaluates Genome NN using tensorflow
+    input: inputArray, nodeGeneArray
+    output:none 
+    """
+    # def GenomeEval(self,inputArray, nodeGeneArray):
+    #     sparse = tf.SparseTensor(indices=self.geneArray, values=self.weights, shape=[len(nodeGeneArray), len(nodeGeneArray)])
+    #     input =
+    #     return
+
+    """
+    SigmoidFunction
     brief: activation function for neurons (hidden and output neurons)
     input: value
     output:answer to function 
     """
-    def ActivationFunction(self,value):
+    def SigmoidFunction(self,value):
         return 1 / (1 + math.exp(-SIG_MOD * value))
+
+    """
+    ReLUFunction
+    brief: activation function using ReLU equation
+    input: value
+    output:answer to function  
+    """
+    def ReLUFunction(self,value):
+        return 0 if value < 0 else value
+
+    """
+    ArcTanFunction
+    brief: activation function using inverse tangent
+    input: value
+    output:answer to equation
+    """
+    def ArcTanFunction(self, value):
+        return math.atan(value)
 
 """
 /**** Species ****/
@@ -138,26 +240,28 @@ Description: group of genomes that match in topology and weights
 class Species():
     """Constructor for Species"""
     def __init__(self,genome, speciesNum):
-        self.niche = []
-        self.topGenome = genome
-        self.speciesNum = speciesNum
+        self.niche = []                                             # genomes grouped with species
+        self.topGenome = genome                                     # best genome of the current and previous species
+        self.speciesNum = speciesNum                                # species number
         self.niche.append(genome)
-        self.stalemate = 1
-        self.adjustedFitness = 0
-        self.prevAdjustedFitness = 0
-        self.numOffspring = 0
+        self.stalemate = 1                                          # number of times species does not improve
+        self.adjustedFitness = 0                                    # adjusted fitness based on niche and fitness
+        self.prevAdjustedFitness = 0                                # previous fitness to check for stalemate
+        self.numOffspring = 0                                       # number of offspring made
 
     """
     Reset
-    brief: deletes all but top genome
+    brief: deletes all but champions of Species
     input: 
     output:none 
     """
     def Reset(self):
+        # check if species stalemate from previous generation
         if abs(self.adjustedFitness - self.prevAdjustedFitness) < 0.001:
             self.stalemate += 1
         else:
             self.stalemate = 1
+        # reset niche and put top genome in niche
         if self.niche:
             self.topGenome = self.niche[0]
         self.niche = []
@@ -172,11 +276,12 @@ class Species():
     """
     def AdjustedFitness(self):
         self.adjustedFitness = 0
+        # check if stalemate, punish if stalemate limit is reached
         if self.stalemate >= STALEMATE_LIMIT:
             stalemateAdjustment = np.square(self.stalemate)
         else:
             stalemateAdjustment = self.stalemate
-
+        # reevaluate fitness of all genomes in niche
         if self.niche:
             for genome in self.niche:
                 genome.fitness = genome.fitness/len(self.niche)
@@ -193,9 +298,12 @@ class Species():
         disjoint, excess, totalDiffWeights = 0, 0, 0
         c1, c2, c3 = C1, C2, C3
 
+        # get gene arrays to compare (topGenome and genome to compare)
         topGeneArray = self.topGenome.geneArray
         newGenomeArray = newGenome.geneArray
         topCount, newCount = 0, 0
+
+        # add disjoint if two genes' innovation number are not equal or compare weights of genes
         while topCount < len(topGeneArray) and newCount < len(newGenomeArray):
             if topGeneArray[topCount].innovationNum > newGenomeArray[newCount].innovationNum:
                 newCount+=1
@@ -209,9 +317,12 @@ class Species():
                 newCount+=1
         excess = abs(len(newGenomeArray)- len(topGeneArray))
 
+        # gene size is the biggest genome
         totalGenes = len(newGenomeArray) if (len(newGenomeArray) > len(topGeneArray)) else len(topGeneArray)
         if totalGenes < GENE_SIZE_LIMIT:
             totalGenes = 1
+
+        # evaluation equation
         differenceVal = c1 * excess / totalGenes + c2 * disjoint / totalGenes + c3 * totalDiffWeights / totalGenes
 
         if speciesThreshold > differenceVal:
@@ -374,6 +485,7 @@ class Population():
             newGenome = Genome(newArr, newW, newActivationList, newGenesMutated)
         elif 1 == len(species.niche):
             newGenome = species.niche[0]
+            self.WeightMutation(newGenome)
         if random.uniform(0, 1) <= NODE_PROB:
             self.NodeMutation(newGenome)
         if random.uniform(0, 1) <= CONN_PROB:
@@ -391,11 +503,12 @@ class Population():
     """
     def Crossover(self):
         newPop =  []
+        breed = self.BreedNewOffspring
         for species in self.speciesGroups.values():
             if species.niche:
                 count = 0
                 while count < species.numOffspring and POP_SIZE > len(newPop):
-                    newGenome = self.BreedNewOffspring(species)
+                    newGenome = breed(species)
                     if newGenome != None:
                         newPop.append(newGenome)
                     count += 1
@@ -426,7 +539,6 @@ class Population():
     def Speciation(self):
         oldTotal = self.total
         self.total = 0
-        newPop = []
         # check all genomes
         for species in self.speciesGroups.values():
             # check = self.KillSpecies(species)
@@ -457,34 +569,34 @@ class Population():
         if abs(self.total-oldTotal) < 0.01:
             self.noChange+=1
 
-        # if self.noChange > 20:
-        #     self.noChange = 0
-        #     topTwo = sorted(self.speciesGroups.values(),
-        #                          key=lambda s: s.adjustedFitness, reverse=True)[:2]
-        #     for species in self.speciesGroups.values():
-        #         # determine number of offspring
-        #         species.numOffspring = 0
-        #         # keep top 20% in niche
-        #         size = len(species.niche) * 0.2
-        #         if size > 2:
-        #             species.niche = species.niche[:int(size) - 1]
-        #     for s in topTwo:
-        #         # determine number of offspring
-        #         species.numOffspring = POP_SIZE / 2
-        #         # sort niche for elimination
-        #         species.niche.sort(key=lambda genome: genome.fitness, reverse=True)
-        #
-        # else:
-        for species in self.speciesGroups.values():
-            # determine number of offspring
-            species.numOffspring = species.adjustedFitness/self.total*POP_SIZE
-            # sort niche for elimination
-            species.niche.sort(key=lambda genome: genome.fitness, reverse=True)
+        if self.noChange > NO_CHANGE_LIMIT:
+            self.noChange = 0
+            topTwo = sorted(self.speciesGroups.values(),
+                                 key=lambda s: s.adjustedFitness, reverse=True)
+            for species in self.speciesGroups.values():
+                # determine number of offspring
+                species.numOffspring = 0
+                # keep top 20% in niche
+                size = len(species.niche) * 0.2
+                if size > 2:
+                    species.niche = species.niche[:int(size) - 1]
+            for s in topTwo[:2]:
+                # determine number of offspring
+                s.numOffspring = POP_SIZE / 2
+                # sort niche for elimination
+                s.niche.sort(key=lambda genome: genome.fitness, reverse=True)
 
-            # keep top 20% in niche
-            size = len(species.niche) * PERCENT_CHAMPS
-            if size > 2:
-                species.niche = species.niche[:int(size) - 1]
+        else:
+            for species in self.speciesGroups.values():
+                # determine number of offspring
+                species.numOffspring = species.adjustedFitness/self.total*POP_SIZE
+                # sort niche for elimination
+                species.niche.sort(key=lambda genome: genome.fitness, reverse=True)
+
+                # keep top 20% in niche
+                size = len(species.niche) * PERCENT_CHAMPS
+                if size > 2:
+                    species.niche = species.niche[:int(size) - 1]
 
         return
 
@@ -654,13 +766,16 @@ By: Edward Guevara
 References:  Sources
 Description: NEAT Algorithm Implementation using Pong
 """
-class NEATPong():
+class NEATPong(Population):
     """Constructor for NEAT"""
-    def __init__(self, numInputs, numOutputs):
-        def __init__(self):
-            numInputs = 3
-            numOutputs = 1
-            super().__init__(numInputs, numOutputs)
+    def __init__(self, numInputs, numOutputs, manager, env, render=False, render_mod=100):
+        self.env = env
+        self.numInputs = numInputs
+        self.render = render
+        self.render_mod = render_mod
+        self.manager = manager
+        self.sharedList = manager.list(range(POP_SIZE))
+        super().__init__(numInputs, numOutputs)
 
     """
     chooseAction
@@ -670,7 +785,6 @@ class NEATPong():
     """
     def chooseAction(self,probability):
         randomValue = np.random.uniform()
-        # random_value = 0.5
         if randomValue < probability:
             # signifies up in openai gym
             return 2
@@ -700,24 +814,57 @@ class NEATPong():
         return gradient_log_p * discounted_episode_rewards
 
     """
-    Evaluation
+    PongEvaluation
     brief: evaluates generation of NEAT
     input: 
     output: 
     """
-    def Evaluation(self):
-        self.population.popEvaluation()
-
-        return
-
-    """
-    NextGeneration
-    brief: takes updated Population and makes new population with mutations and crossbreeding
-    input: 
-    output: 
-    """
-    def NextGeneration(self):
-
+    def PongEvaluation(self):
+        processes = []
+        population = self.sharedList
+        fitnessFunction = self.PongFitnessFunction
+        speciation = self.Speciation
+        crossover = self.Crossover
+        popSort = self.population.sort
+        start = time.time()
+        # process: SPECIATION -> CROSSOVER -> EVALUATION -> CHECK -> SPECIATION...
+        for i, genome in enumerate(self.population):
+            if i != 0:
+                env = gym.make('Pong-v0')
+                p = Process(target=fitnessFunction, args=(population, self.nodeGeneArray, genome, i, env))
+                processes.append(p)
+        for p in processes:
+            p.start()
+        fitnessFunction(population, self.nodeGeneArray, self.population[0], 0, self.env)
+        for p in processes:
+            p.join()
+        print("PARALLEL TIME: %.12f" % (time.time() - start))
+        self.population = list(population[:])
+        # start = time.time()
+        # for i, genome in enumerate(self.population):
+        #     fitnessFunction(population, self.nodeGeneArray, genome, i, self.env)
+        # print("SEQUENTIAL TIME: %.12f" % (time.time()-start))
+        self.numEpisodes += 1
+        start = time.time()
+        speciation()
+        print("SPECIATION TIME: %.12f" % (time.time()-start))
+        start = time.time()
+        crossover()
+        print("CROSSOVER TIME: %.12f" % (time.time() - start))
+        popSort(key=lambda g: g.answer, reverse=True)
+        # show information needed to be seen
+        print(self.numEpisodes , len(self.speciesGroups))
+        print(len(self.nodeGeneArray), len(self.connGeneArray))
+        arrGenome = "["
+        g = self.population[0]
+        print(g.answer)
+        # print(g.tests)
+        for gene in g.geneArray:
+            arrGenome += str(gene.n1)
+            arrGenome += ", "
+            arrGenome += str(gene.n2)
+            arrGenome += "; "
+        print(arrGenome + "]")
         return
 
     """
@@ -727,44 +874,42 @@ class NEATPong():
     output:none 
     """
 
-    def PongFitnessFunction(env, inputDimensions, nodeGeneArray, generation, genome,
-                            render=False, render_mod=100):
+    def PongFitnessFunction(self, population, nodeGeneArray, genome, i, env):
+        # print("Genome running: %i" % i)
+        start = time.time()
         observation = env.reset()
-        rewardSum = 0
+        rewardSum = 1
         done = False
-        episodeRewards, episode_gradient_log_ps = [], []
         prev_processed_observations = None
+        eval = genome.GenomeEval
+        maxNode = max(nodeGeneArray, key=nodeGeneArray.get)
+        process = preprocess_observations
+        render = i == 0 and self.render and self.numEpisodes % self.render_mod == 0
         while not done:
-            if render and generation % render_mod == 0:
+            if render:
                 env.render()
-            processed_observations, prev_processed_observations = preprocess_observations(observation,
-                                                                                          prev_processed_observations,
-                                                                                          inputDimensions)
-            genome.GenomeEval(processed_observations, nodeGeneArray)
-            up_probability = genome.geneArray[max(nodeGeneArray.items(), key=operator.itemgetter(1))]
-
+            processed_observations, prev_processed_observations = process(observation,
+                                                                          prev_processed_observations,
+                                                                          self.numInputs)
+            eval(processed_observations, nodeGeneArray)
+            up_probability = genome.neuronArray[maxNode]
             action = self.chooseAction(up_probability)
-
             # carry out the chosen action
             observation, reward, done, info = env.step(action)
-
             rewardSum += reward
-            episodeRewards.append(reward)
 
             # see here: http://cs231n.github.io/neural-networks-2/#losses
             fake_label = 1 if action == 2 else 0
             loss_function_gradient = fake_label - up_probability
-            episode_gradient_log_ps.append(loss_function_gradient)
 
-        # Combine the following values for the episode
-        episode_gradient_log_ps = np.vstack(episode_gradient_log_ps)
-        episodeRewards = np.vstack(episodeRewards)
-
-        # Tweak the gradient of the log_ps based on the discounted rewards
-        episode_gradient_log_ps_discounted = self.discount_with_rewards(episode_gradient_log_ps,
-                                                                        episodeRewards, 0.99)
-
-        # TODO: evaluate genome and determine fitness function
+        # TODO: determine fitness function and Apply Q-Learning
+        genome.fitness = np.square((21.0 + rewardSum)/43.0)
+        genome.answer = rewardSum
+        env.close()
+        end = time.time()
+        population[i] = genome
+        # print("GENOME %i Time: %.12f" % (i, end-start))
+        # print("GENOME %i Fitness: %.12f" % (i, population[i].answer))
         return
 
 """
@@ -787,7 +932,7 @@ class NeatTest(Population):
     output:none 
     """
 
-    def XORFitnessFunction(self, nodeGeneArray, genome):
+    def XORFitnessFunction(self,nodeGeneArray, genome):
         total = 0
         fitness = 0
         genome.tests = []
@@ -801,7 +946,7 @@ class NeatTest(Population):
             genome.tests.append(ans)
         genome.answer = total / 4
         genome.fitness = fitness
-
+        genome.test = genome.test/4
         return
 
     """
@@ -811,11 +956,15 @@ class NeatTest(Population):
     output:none 
     """
     def XOREvaluation(self):
+        speciation = self.Speciation
+        crossover = self.Crossover
+        sortPopulation = self.population.sort
+        fitnessFunction = self.XORFitnessFunction
         check = False
+        test = 0
         arrGenome = ""
-        for genome in self.population:
-            self.XORFitnessFunction(self.nodeGeneArray, genome)
-        # for num_episodes in range(0, NUM_EPISODES):
+        for j, genome in enumerate(self.population):
+            fitnessFunction(self.nodeGeneArray, genome)
         while not check:
             # if self.numEpisodes % 500 == 1:
             #     self.ResetPopulation()
@@ -837,11 +986,20 @@ class NeatTest(Population):
             self.numEpisodes +=1
 
             # process: SPECIATION -> CROSSOVER -> EVALUATION -> CHECK -> SPECIATION...
-            self.Speciation()
-            self.Crossover()
+            start = time.time()
+            speciation()
+            # end = time.time()
+            # print("SPECIATION TIME: %.12f" % (end-start))
+            # start = time.time()
+            crossover()
+            # end = time.time()
+            # print("CROSSOVER TIME: %.12f" % (end-start))
+            start = time.time()
             for genome in self.population:
-                self.XORFitnessFunction(self.nodeGeneArray, genome)
-            self.population.sort(key=lambda g: g.answer, reverse=True)
+                fitnessFunction(self.nodeGeneArray, genome)
+            end = time.time()
+            print("EVALUATION TIME: %.12f" % (end-start))
+            sortPopulation(key=lambda g: g.answer, reverse=True)
             for genome in self.population:
                 if genome.answer > EXPECTED_ACCURACY:
                     check = True

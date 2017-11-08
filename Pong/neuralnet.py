@@ -4,7 +4,7 @@ import tensorflow as tf
 import numpy as np
 import random
 
-INIT_WEIGHT = 0.05
+INIT_WEIGHT = 0.5
 
 def sigmoid(x):
     #sigmoid function
