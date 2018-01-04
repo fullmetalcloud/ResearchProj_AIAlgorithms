@@ -1,68 +1,31 @@
-from neuralnet import NeuralNetwork, NNTest
-from convonn import ConvolutionNN
-from neatq import NEATPong, NeatTest
-from multiprocessing import Manager
-import tensorflow as tf
-import gym
-import time
 import os
+import time
+from multiprocessing import Manager
+
+import gym
 import matplotlib.pyplot as pyplot
+import numpy as np
+import tensorflow as tf
 
-fig, ax = pyplot.subplots()
-
-"""
-ShowNEATNeuralNetwork
-brief: graph neural network
-input: genome
-output:none 
-"""
-def ShowNEATNeuralNetwork(genome, nodeGeneArray):
-    layers = {}
-    for v in set(nodeGeneArray.values()):
-        layers[v] = []
-    for k, v in nodeGeneArray.items():
-        layers[v].append(k)
-    largestLayerSize = max(len(x) for x in layers.values())
-
-    for i, j in enumerate(genome.geneArray):
-        neuron1 = j.n1
-        neuron2 = j.n2
-        layerN1 = layers[nodeGeneArray[neuron1]]
-        layerN2 = layers[nodeGeneArray[neuron2]]
-        n1 = layerN1.index(neuron1)
-        n2 = layerN2.index(neuron2)
-        type1 = nodeGeneArray[neuron1]
-        type2 = nodeGeneArray[neuron2]
-        posN1 = n1 * largestLayerSize / len(layerN1) + largestLayerSize / len(layerN1) / 2
-        posN2 = n2 * largestLayerSize / len(layerN2) + largestLayerSize / len(layerN2) / 2
-        line_y = (posN1, posN2)
-        line_x = (type1, type2)
-        if genome.activationList[i]:
-            if genome.weights[i] > 0:
-                pyplot.plot(line_x, line_y, linewidth=genome.weights[i], color='blue')
-            else:
-                pyplot.plot(line_x, line_y, linewidth=genome.weights[i], color='red')
-        if type1 == 1:
-            pyplot.plot(type1, posN1, 'o', color='green')
-        else:
-            pyplot.plot(type1, posN1, 'o', color='black')
-        pyplot.plot(type2, posN2, 'o', color='black')
-
-    pyplot.show()
-    return
+from NEAT.neatq import NEATPong, NeatTest
+from NEAT.plot import *
+from Agents.poli_grad_nn import PoliGradAgent
+from Agents.convo_nn import ConvolutionNN
+from unit_tests import *
 
 
 def main():
     # for testing
-    render = False
+    render = True
 
-    Run_Pong = False
+    Run_Pong = True
+    neuralNet = True
     convoNN = False
-    neuralNet = False
     NeatAlgo = False
 
     NNTests = False
-    NEATTests = True
+    NEATTests = False
+    PoliGradNNTests = False
 
     render_mod = 10
 
@@ -73,11 +36,19 @@ def main():
     num_layer_neurons_ConvoNN = [256, 200, 1]
     height = 80
     width = 80
-    directory = os.getcwd() + "/tmp/"
     reward = []
+
+    # location of saved files (networks, speciation graphs, videos)
+    directory = os.getcwd() + "/tmp/"
+
     #parameters for monitoring and recording games
+    running_reward_NN = None
+    prev_running_reward_NN = 0
+    best_reward_NN = None
     episode_number_NN = 0
     time_nn, reward_nn  = [0], [0]
+
+
     episode_number_ConvoNN = 0
     time_convonn, reward_convonn = [0], [0]
     episode_number_NEAT = 0
@@ -86,159 +57,190 @@ def main():
     record_rate_convoNN = 100
     record_rate_NEAT = 100
 
+    sortedPop = []
+
     #initialize gym environment
     if neuralNet:
+        # tensorflow session init
         sess_nn = tf.Session()
+
+        # openAI env init
         envNN = gym.make('Pong-v0')
-        envNN = gym.wrappers.Monitor(envNN, directory + "NN", force=True,
+
+        # openAI env recording videos init
+        envNN = gym.wrappers.Monitor(envNN,
+                                     directory + "NN",
+                                     force=True,
                                      video_callable=lambda episode_id: 0 == episode_number_NN % record_rate_NN)
-        nn = NeuralNetwork(num_layer_neurons_NN, sess_nn)
+
+        # file creation of NN
+        fileNN = open(directory + 'NN/NNInfo', 'w')
+        fileNN.write('episode,time,score\n')
+
+        # class creation of NN Agent
+        nn = PoliGradAgent(num_layer_neurons_NN,
+                           sess_nn)
+
     if convoNN:
+        # tensorflow session init
         sess_convonn = tf.Session()
+        # openAI env init
         envConvoNN = gym.make('Pong-v0')
-        envConvoNN = gym.wrappers.Monitor(envConvoNN, directory + "ConvoNN", force=True,
+
+        # openAI env recording videos init
+        envConvoNN = gym.wrappers.Monitor(envConvoNN,
+                                          directory + "ConvoNN",
+                                          force=True,
                                           video_callable=lambda
                                               episode_id: 0 == episode_number_ConvoNN % record_rate_convoNN)
-        convo_nn = ConvolutionNN(num_layer_neurons_ConvoNN, height, width, sess_convonn)
+
+        # file creation of Convolutional NN
+        fileconvoNN = open(directory + 'ConvoNN/ConvoNNInfo', 'w')
+        fileconvoNN.write('episode,time,score\n')
+
+        # class creation of Convolutional NN Agent
+        convo_nn = ConvolutionNN(num_layer_neurons_ConvoNN,
+                                 height,
+                                 width,
+                                 sess_convonn)
     if NeatAlgo:
+
+        # openAI env init
         envNEAT = gym.make('Pong-v0')
+
+        # openAI env recording videos init
+        envNEAT = gym.wrappers.Monitor(envNEAT,
+                                       directory+"NEAT",
+                                       force=True,
+                                       video_callable=lambda episode_id: 0 == episode_number_NEAT % record_rate_NEAT)
+
+        # multiprocessing manager for sharing variables
         manager = Manager()
-        # envNEAT = gym.wrappers.Monitor(envNEAT, directory+"NEAT", force=True,
-        #                          video_callable=lambda episode_id: 0 == episode_number_NEAT % record_rate_NEAT)
-        neat = NEATPong(numInputs, numOutputs, manager, envNEAT, render, render_mod)
-    # Unit testing of classes
+
+        # class creation of NEAT Agent
+        neat = NEATPong(numInputs,
+                        numOutputs,
+                        envNEAT,
+                        render,
+                        render_mod,
+                        manager=manager)
+
+    # Unit testing of classes (XOR Example)
     if NNTests:
-        accuracy = 0
-        numEpisodes = 0
-        numTests = 10
-        print("NNTests Beginning: ")
-        for i in range(0, numTests):
-            print("... testing " + str(i) + "...")
-            sess_test = tf.Session()
-            nnTest = NNTest(100, sess_test)
-            acc, episodes = nnTest.test_eval()
-            numEpisodes+=episodes
-            accuracy+=acc
-            sess_test.close()
-            print(i, acc, episodes)
-        print("Average NN Accuracy: " + str(accuracy/numTests))
-        print("Average NN Episodes: " + str(numEpisodes/numTests))
+        UnitTest_NNAgent()
+
+    if PoliGradNNTests:
+        UnitTest_PoliGradNN()
 
     if NEATTests:
-        arrGenome = "["
-        nCount = 0
-        numEpisodes = 0
-        avgTime = 0
-        numTests = 10
-        topGenomes = []
-        print("NEATTests Beginning: ")
-        for i in range(0,numTests):
-            print("... testing " + str(i) + "...")
-            neatTest = NeatTest()
-            start = time.time()
-            neatTest.XOREvaluation()
-            end = time.time()
-            population =neatTest.population
-
-            print("results: " + str(i))
-            reward = []
-            for genome in population:
-                reward.append(genome.answer)
-            sortedPop = [x for _,x in sorted(zip(reward,population), key=lambda pair: pair[0], reverse=True)]
-            genome = sortedPop[0]
-            topGenomes.append(genome)
-            # print(len(neatTest.speciesGroups))
-            # for gene in genome.geneArray:
-            #     arrGenome += str(gene.n1)
-            #     arrGenome += ", "
-            #     arrGenome += str(gene.n2)
-            #     arrGenome += "; "
-            # print(arrGenome + "]")
-            # arrGenome = "["
-            # print(genome.weights)
-            # print(genome.activationList)
-            # print(genome.neuronArray)
-            # print(genome.answer)
-            # print(genome.tests)
-            print()
-            neurons = []
-            ShowNEATNeuralNetwork(genome, neatTest.nodeGeneArray)
-            for i, j in enumerate(genome.geneArray):
-                neurons.append(j.n1)
-                neurons.append(j.n2)
-            print(genome.answer)
-            print(len(set(neurons)), neatTest.numEpisodes)
-            print(str(end-start))
-            nCount += len(set(neurons))
-            numEpisodes += neatTest.numEpisodes
-            avgTime += (end - start)
-            print()
-        print("Average Number of Nodes: " + str(nCount/numTests))
-        print("Average Episodes: " + str(numEpisodes/numTests))
-        print("Average Time: " + str(avgTime/numTests))
+        UnitTest_NEAT()
 
     if Run_Pong:
-        while True:
-            # Pong Game
+        try:
+            while True:
+                # Pong Game
+                if neuralNet:
+                    # evaluate Fully Connected Neural Network
+                    episode_number_NN = nn.episode_num
+                    print(episode_number_NN)
+                    start = time.time()
+                    nn.eval(envNN, render)
+                    end = time.time()
+                    print("NN Reward: %i Time: %.3f" % (nn.reward_sum, end-start))
+                    fileNN.write('%i,%.3f,%i\n' % (episode_number_NN,
+                                                         (end - start),
+                                                         nn.reward_sum))
+
+                    # score and improvement records
+                    running_reward_NN = nn.reward_sum if running_reward_NN is None \
+                        else running_reward_NN * 0.99 + nn.reward_sum * 0.01
+                    if best_reward_NN is None:
+                        best_reward_NN = nn.reward_sum
+                    elif nn.reward_sum > best_reward_NN:
+                        best_reward_NN = nn.reward_sum
+
+
+                    if episode_number_NN % nn.batch_size == 0:
+
+                        print(
+                            'World Perf: Episode %f. mean reward: %f. diff: %f time: %.4f Top Score: %i' % (
+                                nn.episode_num,
+                                running_reward_NN,
+                                running_reward_NN - prev_running_reward_NN,
+                                sum(time_nn) / len(time_nn),
+                                best_reward_NN))
+                        prev_running_reward_NN = running_reward_NN
+                        time_nn,reward_nn = [], []
+                    else:
+                        time_nn.append(end - start)
+                        reward_nn.append(nn.reward_sum)
+                    if episode_number_NN == 1000:
+                        # record_rate_NN = 1000
+                        nn.render_mod = 1000
+                    elif episode_number_NN == 10000:
+                        # record_rate_NN = 2000
+                        nn.render_mod = 2000
+
+                if convoNN:
+                    # evaluate Convolutional Fully Connected Neural Network
+                    episode_number_ConvoNN = convo_nn.episode_num
+                    print(episode_number_ConvoNN)
+                    start = time.time()
+                    convo_nn.eval(envConvoNN, render)
+                    end = time.time()
+                    print("Convolutional Neural Network Time: " + str(end - start))
+                    print("Convolutional Neural Network Reward: " + str(convo_nn.reward_sum))
+                    fileconvoNN.write('%i,%.3f,%i\n' % (episode_number_NN, (end - start), convo_nn.reward_sum))
+                    if episode_number_ConvoNN % record_rate_convoNN == 0:
+                        print("Average ConvoNN time: " + str(sum(time_convonn) / len(time_convonn)))
+                        print("Average ConvoNN reward: " + str(sum(reward_convonn) / len(reward_convonn)))
+                        time_convonn, reward_convonn = [], []
+                    else:
+                        time_convonn.append(end - start)
+                        reward_convonn.append(convo_nn.reward_sum)
+                    if convo_nn.episode_num == 1000:
+                        record_rate_convoNN = 1000
+                        convo_nn.render_mod = 1000
+                    elif convo_nn.episode_num == 10000:
+                        record_rate_convoNN = 2000
+                        convo_nn.render_mod = 2000
+
+                if NeatAlgo:
+                    # evaluate NEAT algorithm
+                    episode_number_NEAT = neat.numEpisodes
+                    print(episode_number_NEAT)
+                    start = time.time()
+                    neat.PongEvaluation()
+                    end = time.time()
+                    for genome in neat.population:
+                        reward.append(genome.answer)
+                    sortedPop = [x for _, x in sorted(zip(reward, neat.population), key=lambda pair: pair[0], reverse=True)]
+
+                    print("Neat Algorithm Time: " + str(end - start))
+                    print("Neat Algorithm Reward: " + str(sortedPop[0].answer))
+                    time_neat.append(end-start)
+                    reward_neat.append(sortedPop[0].answer)
+                    if sortedPop[0].answer >= 0:
+                        print('\n\n<<<<< I WON >>>>>\n\n')
+                    if episode_number_NEAT % record_rate_NEAT == 0:
+                        print("Average Neat Algorithm time: " + str(sum(time_neat) / len(time_neat)))
+                        print("Average Neat Algorithm reward: " + str(sum(reward_neat) / len(reward_neat)))
+                        if sortedPop:
+                            ShowNEATNeuralNetwork(sortedPop[0], neat.nodeGeneArray, directory, neat.numEpisodes)
+                        ShowSpeciesChart(neat.recordedSpecies, neat.numSpecies, directory, neat.numEpisodes)
+
+
+        except KeyboardInterrupt:
             if neuralNet:
-                episode_number_NN = nn.episode_num
-                print(episode_number_NN)
-                #evaluate Fully Connected Neural Network
-                start = time.time()
-                nn.eval(envNN, render)
-                end = time.time()
-                print("Neural Network Time: " + str(end - start))
-                print("Neural Network Reward: " + str(nn.reward_sum))
-                if episode_number_NN % record_rate_NN == 0:
-                    print("Average NN time: " + str(sum(time_nn) / len(time_nn)))
-                    print("Average NN reward: " + str(sum(reward_nn) / len(reward_nn)))
-                    time_nn,reward_nn = [], []
-                else:
-                    time_nn.append(end - start)
-                    reward_nn.append(nn.reward_sum)
-                if episode_number_NN == 1000:
-                    record_rate_NN = 1000
-                elif episode_number_NN == 10000:
-                    record_rate_NN = 2000
-
+                fileNN.close()
             if convoNN:
-                #evaluate Convolutional Fully Connected Neural Network
-                episode_number_ConvoNN = convo_nn.episode_num
-                print(episode_number_ConvoNN)
-                start = time.time()
-                convo_nn.eval(envConvoNN, render)
-                end = time.time()
-                print("Convolutional Neural Network Time: " + str(end - start))
-                print("Convolutional Neural Network Reward: " + str(convo_nn.reward_sum))
-                if episode_number_ConvoNN % record_rate_convoNN == 0:
-                    print("Average ConvoNN time: " + str(sum(time_convonn) / len(time_convonn)))
-                    print("Average ConvoNN reward: " + str(sum(reward_convonn) / len(reward_convonn)))
-                    time_convonn, reward_convonn = [], []
-                else:
-                    time_convonn.append(end - start)
-                    reward_convonn.append(nn.reward_sum)
-                if convo_nn.episode_num == 1000:
-                    record_rate_convoNN = 1000
-                elif convo_nn.episode_num == 10000:
-                    record_rate_convoNN = 2000
+                fileconvoNN.close()
+            # if NeatAlgo:
+                # print("...LOADING SPECIATION CHART...")
+                # if sortedPop:
+                #     ShowNEATNeuralNetwork(sortedPop[0], neat.nodeGeneArray, directory, neat.numEpisodes)
+                # ShowSpeciesChart(neat.recordedSpecies, neat.numSpecies, directory, neat.numEpisodes)
+            print('Interrupted')
 
-            if NeatAlgo:
-                episode_number_NEAT = neat.numEpisodes
-                print(episode_number_NEAT)
-                start = time.time()
-                neat.PongEvaluation()
-                end = time.time()
-                for genome in neat.population:
-                    reward.append(genome.answer)
-                sortedPop = [x for _, x in sorted(zip(reward, neat.population), key=lambda pair: pair[0], reverse=True)]
-
-                print("Neat Algorithm Time: " + str(end - start))
-                print("Neat Algorithm Reward: " + str(sortedPop[0].answer))
-                time_neat.append(end-start)
-                reward_neat.append(sortedPop[0].answer)
-                if episode_number_NEAT % record_rate_NEAT == 0:
-                    print("Average Neat Algorithm time: " + str(sum(time_neat) / len(time_neat)))
-                    print("Average Neat Algorithm reward: " + str(sum(reward_neat) / len(reward_neat)))
-
-
-main()
+if __name__ == '__main__':
+    main()
